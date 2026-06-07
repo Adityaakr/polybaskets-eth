@@ -1,0 +1,27 @@
+# ── secrets — NEVER commit ──────────────────────────────────────────────
+# deploy/.env.deploy holds the operator PRIVATE KEY. Do not commit any .env.
+.env
+.env.*
+!.env.example
+deploy/.env.deploy
+deploy/relayer-state.json
+
+# ── dependencies ────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+.npmrc
+
+# ── builds / artifacts ──────────────────────────────────────────────────
+dist/
+build/
+**/dist/
+**/build/
+target/
+**/target/
+*.tsbuildinfo
+
+# ── editor / OS ─────────────────────────────────────────────────────────
+.DS_Store
+*.log
+.vscode/
+.idea/
