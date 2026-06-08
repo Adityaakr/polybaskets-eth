@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { PrivyProvider, usePrivy, useWallets, useSendTransaction } from "@privy-io/react-auth";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
+import { PrivyProvider, usePrivy, useWallets, useSendTransaction, useSignMessage } from "@privy-io/react-auth";
 import { config, hoodiChain } from "@/config";
-import { buildSession, type VaraEthSession } from "@/lib/varaeth";
+import { buildSession, type EmbeddedSigner, type VaraEthSession } from "@/lib/varaeth";
 
 interface WalletState {
   /** Privy configured at all? */
@@ -30,61 +30,70 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets } = useWallets();
   const { sendTransaction } = useSendTransaction();
+  const { signMessage } = useSignMessage();
   const sessionRef = useRef<VaraEthSession | null>(null);
 
   const activeWallet = wallets.find((w) => w.address === user?.wallet?.address) ?? wallets[0];
   const address = (user?.wallet?.address ?? activeWallet?.address ?? null) as
     | `0x${string}`
     | null;
-  const isEmbedded = (activeWallet?.walletClientType ?? user?.wallet?.walletClientType) === "privy";
+  // Embedded = the ACTIVE wallet is the Privy email wallet. Trust the resolved wallet's own type
+  // first; fall back to the user's linked wallet type ONLY when it's the same address (covers the
+  // brief window where useWallets hasn't populated walletClientType yet). This deliberately does
+  // NOT treat an external wallet as embedded — routing an external wallet through Privy's hooks is
+  // exactly what threw "Must have a Privy wallet before signing".
+  const sameAddr = user?.wallet?.address?.toLowerCase() === activeWallet?.address?.toLowerCase();
+  const isEmbedded =
+    (activeWallet?.walletClientType ?? (sameAddr ? user?.wallet?.walletClientType : undefined)) === "privy";
 
-  // Invalidate the cached session when the address, the Privy sendTransaction binding, OR the
-  // embedded flag changes. The embedded flag matters because Privy can populate walletClientType a
-  // tick AFTER the wallet appears — without this, a session built in that window has no sendTx and
-  // gets cached, so every deposit falls back to the raw provider (4100). Rebuilding on the flip fixes it.
+  // Invalidate the cached session when the address, the Privy bindings, or the embedded flag changes
+  // (Privy can populate walletClientType a tick after the wallet appears — rebuilding on the flip
+  // prevents a wrong-path session from sticking).
   useEffect(() => {
     sessionRef.current = null;
-  }, [address, sendTransaction, isEmbedded]);
+  }, [address, sendTransaction, signMessage, isEmbedded]);
 
   const getSession = useCallback(async () => {
     if (!address) throw new Error("Connect a wallet first.");
-    const wallet = wallets.find((w) => w.address === address) ?? wallets[0];
-    if (!wallet) throw new Error("No wallet available.");
-    // VALUE/CONTRACT txns (deposits, approvals): embedded wallets reject the raw-provider
-    // eth_sendTransaction with 4100, so route them through Privy's useSendTransaction instead.
-    // External wallets leave sendTx undefined and use the viem walletClient (native popup).
-    // Detect embedded robustly — the resolved wallet entry can momentarily lack walletClientType,
-    // so also trust the logged-in user's wallet type and the component-level isEmbedded flag.
-    const isEmbeddedWallet =
-      wallet.walletClientType === "privy" ||
-      user?.wallet?.walletClientType === "privy" ||
-      isEmbedded;
-    // Reuse the cached session ONLY if its send path matches the current embedded detection. A
-    // session built before Privy populated the wallet type would lack sendTx; never reuse that for
-    // an embedded wallet (that's the intermittent 4100 — a stale wrong session getting cached).
-    if (sessionRef.current && !!sessionRef.current.sendTx === isEmbeddedWallet) return sessionRef.current;
-    // Sign through the wallet's EIP-1193 provider for BOTH embedded and external wallets (personal_sign).
-    const provider = await wallet.getEthereumProvider();
-    const sendTx = isEmbeddedWallet
-      ? async (tx: { to: `0x${string}`; data?: `0x${string}`; value?: bigint }) => {
+    // Reuse the cached session ONLY if its send path matches the current embedded detection — a
+    // session built before Privy populated the wallet type would be on the wrong path.
+    if (sessionRef.current && !!sessionRef.current.sendTx === isEmbedded) return sessionRef.current;
+
+    let session: VaraEthSession;
+    if (isEmbedded) {
+      // Embedded (email) wallet: sign EVERYTHING through Privy's official hooks, targeting this
+      // wallet explicitly via `address`. The raw EIP-1193 provider 4100s for embedded wallets
+      // (it skips Privy's internal connect()); the hooks handle connect + correct wallet + encoding.
+      const embedded: EmbeddedSigner = {
+        address,
+        // Bets (injected tx): sign the 32-byte hash. Privy detects the 0x-hex and signs it as raw
+        // bytes (encoding: "hex") — identical to viem signMessage({message:{raw}}), so the
+        // validator accepts it.
+        signHash: async (hashHex) => {
+          const { signature } = await signMessage({ message: hashHex }, { address });
+          return signature as `0x${string}`;
+        },
+        // Deposits / approvals (value + contract txns) on Hoodi.
+        sendTransaction: async (tx) => {
           const { hash } = await sendTransaction(
-            {
-              to: tx.to,
-              data: tx.data,
-              value: tx.value !== undefined ? (`0x${tx.value.toString(16)}` as `0x${string}`) : undefined,
-              chainId: hoodiChain.id,
-            },
-            { uiOptions: { showWalletUIs: true } },
+            { to: tx.to, data: tx.data, value: tx.value, chainId: hoodiChain.id },
+            { address },
           );
           return hash;
-        }
-      : undefined;
-    // eslint-disable-next-line no-console
-    console.info("[wallet] session built", { embedded: isEmbeddedWallet, hasSendTx: !!sendTx, walletClientType: wallet.walletClientType });
-    const session = await buildSession({ provider: provider as any }, address, sendTx);
+        },
+      };
+      session = await buildSession({ embedded }, address);
+    } else {
+      // External wallet (MetaMask, etc.): everything signs through its own EIP-1193 provider with a
+      // native popup, which authorizes all methods — no 4100.
+      const wallet = wallets.find((w) => w.address === address) ?? wallets[0];
+      if (!wallet) throw new Error("No wallet available.");
+      const provider = await wallet.getEthereumProvider();
+      session = await buildSession({ provider: provider as any }, address);
+    }
     sessionRef.current = session;
     return session;
-  }, [address, wallets, sendTransaction, isEmbedded, user]);
+  }, [address, wallets, sendTransaction, signMessage, isEmbedded]);
 
   const value = useMemo<WalletState>(
     () => ({
@@ -129,11 +138,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     <PrivyProvider
       appId={config.privyAppId}
       config={{
-        // Email OTP + external wallets. Email creates a Privy embedded wallet that we drive as a viem
-        // LOCAL account (toViemAccount in getSession) — so bets AND deposits sign SILENTLY, no popup,
-        // never touching the raw EIP-1193 provider (which is what threw 4100 with showWalletUIs:false).
-        // showWalletUIs stays true purely as a safety net for any incidental provider use; the silent
-        // path doesn't rely on it. Embedded wallet starts empty; user funds it via the "Fund" QR.
+        // Email OTP + external wallets. Email creates a Privy embedded wallet; we sign its bets via
+        // useSignMessage and its deposits via useSendTransaction (see WalletContext getSession) —
+        // the only paths the embedded wallet authorizes. The raw EIP-1193 provider 4100s for embedded
+        // wallets, so we never use it for them. showWalletUIs:true shows Privy's confirm modal on
+        // sign/send. Embedded wallet starts empty; user funds it via the "Fund" QR.
         loginMethods: ["email", "wallet"],
         embeddedWallets: {
           createOnLogin: "users-without-wallets",

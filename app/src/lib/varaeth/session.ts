@@ -1,12 +1,13 @@
 import {
+  bytesToHex,
   createPublicClient,
   createWalletClient,
   custom,
   http,
-  type Account,
   type PublicClient,
   type WalletClient,
 } from "viem";
+import { toAccount } from "viem/accounts";
 import { EthereumClient, VaraEthApi, WsVaraEthProvider } from "@vara-eth/api";
 import { SailsProgram } from "sails-js";
 import { SailsIdlParser } from "sails-js/parser";
@@ -21,6 +22,20 @@ export interface Eip1193 {
  *  (the raw EIP-1193 eth_sendTransaction returns 4100 for embedded wallets). External wallets leave it
  *  undefined and use the viem walletClient. Returns the tx hash. */
 export type SendTx = (tx: { to: `0x${string}`; data?: `0x${string}`; value?: bigint }) => Promise<`0x${string}`>;
+
+/** Sign a 32-byte hash with raw-bytes personal_sign (the injected-tx signature). For embedded wallets
+ *  this MUST go through Privy's useSignMessage — the raw EIP-1193 provider rejects it with 4100 because
+ *  it never runs Privy's internal connect(). Privy detects the 0x-hex message and signs it with
+ *  `encoding: "hex"`, producing the exact same signature as viem's signMessage({message:{raw}}). */
+export type SignHash = (hashHex: `0x${string}`) => Promise<`0x${string}`>;
+
+/** Privy embedded-wallet signer bundle. Both methods are the OFFICIAL Privy hooks (connect + correct
+ *  address + hex encoding handled internally) — the only reliable path for an embedded wallet. */
+export interface EmbeddedSigner {
+  address: `0x${string}`;
+  signHash: SignHash;
+  sendTransaction: SendTx;
+}
 
 export interface VaraEthSession {
   address: `0x${string}`;
@@ -88,15 +103,15 @@ async function ensureHoodi(provider: Eip1193) {
  * Message encoding is handled by ./codec (no sails-js IDL load needed at runtime).
  *
  * Two signing paths:
- *  - `account` (Privy embedded wallet via toViemAccount): a viem LOCAL account that signs messages
- *    AND transactions silently — no popup, no raw-provider call. Sends broadcast over http(). This
- *    is the no-popup email-wallet path (createInjectedTransaction's personal_sign is signed locally).
+ *  - `embedded` (Privy email wallet): a viem LOCAL account whose signMessage delegates to Privy's
+ *    useSignMessage hook (which connects + signs the hex hash as raw bytes — the only path the
+ *    embedded wallet authorizes; the raw provider 4100s). Value/contract txns go through
+ *    `sendTx` (Privy's useSendTransaction). NEVER touches the raw EIP-1193 provider.
  *  - `provider` (external wallet, e.g. MetaMask): EIP-1193; signs with the wallet's own native popup.
  */
 export async function buildSession(
-  source: { provider: Eip1193; account?: undefined } | { account: Account; provider?: undefined },
+  source: { provider: Eip1193; embedded?: undefined } | { embedded: EmbeddedSigner; provider?: undefined },
   address: `0x${string}`,
-  sendTx?: SendTx,
 ): Promise<VaraEthSession> {
   if (!config.routerAddress || !config.programId) {
     throw new ChainNotReadyError(
@@ -109,15 +124,32 @@ export async function buildSession(
     transport: http(config.ethRpc),
   });
 
-  // Embedded (local account): sign locally, broadcast over http — fully silent.
-  // External (provider): switch to Hoodi, sign + broadcast through the wallet (native popup).
+  // Embedded: a local viem account that signs the injected-tx hash via Privy's useSignMessage, then
+  //   broadcasts over http(). Value/contract txns bypass the walletClient entirely via `sendTx`.
+  // External: switch to Hoodi, sign + broadcast through the wallet's own provider (native popup).
   let walletClient: WalletClient;
-  if (source.account) {
-    walletClient = createWalletClient({
-      account: source.account,
-      chain: hoodiChain,
-      transport: http(config.ethRpc),
+  let sendTx: SendTx | undefined;
+  if (source.embedded) {
+    const { signHash, sendTransaction } = source.embedded;
+    const account = toAccount({
+      address,
+      // The injected flow calls walletClient.signMessage({ message: { raw: <hash> } }). Forward the
+      // hash (hex) to Privy's signMessage, which signs it as raw bytes — matching the validator.
+      async signMessage({ message }) {
+        const raw = typeof message === "string" ? message : (message as { raw: `0x${string}` | Uint8Array }).raw;
+        const hex = (typeof raw === "string" ? raw : bytesToHex(raw)) as `0x${string}`;
+        return signHash(hex);
+      },
+      // Embedded value/contract txns go through sendTx (Privy), not a raw-signed tx — these throw if hit.
+      async signTransaction() {
+        throw new Error("Embedded wallet: transactions are sent via Privy useSendTransaction, not signed locally.");
+      },
+      async signTypedData() {
+        throw new Error("Embedded wallet: typed-data signing is not used.");
+      },
     });
+    walletClient = createWalletClient({ account, chain: hoodiChain, transport: http(config.ethRpc) });
+    sendTx = sendTransaction;
   } else {
     await ensureHoodi(source.provider);
     walletClient = createWalletClient({
