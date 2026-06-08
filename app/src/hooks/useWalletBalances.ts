@@ -19,12 +19,14 @@ export interface WalletBalances {
   wvara: bigint; // wVARA token balance (12 dec)
 }
 
-/** Read the connected wallet's live on-chain balances (ETH + wVARA). Polls every 15s. */
+/** Read the connected wallet's live on-chain balances (ETH + wVARA). Polls every 5s + on focus. */
 export function useWalletBalances(address?: string | null) {
   return useQuery<WalletBalances>({
     queryKey: ["wallet-balances", address],
     enabled: Boolean(address),
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+    staleTime: 2_000,
     queryFn: async () => {
       const a = address as `0x${string}`;
       const [eth, wvara] = await Promise.all([

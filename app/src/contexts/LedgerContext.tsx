@@ -148,12 +148,12 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [chainReady, wallet.address, withClient]);
 
-  // Background auto-refresh — balances/positions always catch up within ~6s of an on-chain commit,
+  // Background auto-refresh — balances/positions catch up within ~3s of an on-chain commit,
   // independent of any in-flight action poll (robustness: deposits/bets reflect even if you navigate).
   useEffect(() => {
     if (!chainReady || !wallet.authenticated || !wallet.address) return;
     refresh();
-    const iv = setInterval(refresh, 6000);
+    const iv = setInterval(refresh, 3000);
     return () => clearInterval(iv);
   }, [chainReady, wallet.authenticated, wallet.address, refresh]);
 
