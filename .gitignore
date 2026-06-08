@@ -15,6 +15,9 @@ deploy/ethexe-bin
 node_modules/
 **/node_modules/
 .npmrc
+# but DO ship app/.npmrc — it only sets legacy-peer-deps (needed for the @polkadot/sails-js
+# peer conflict) so `npm ci` works on Railway. It contains no tokens.
+!app/.npmrc
 
 # ── builds / artifacts ──────────────────────────────────────────────────
 dist/
