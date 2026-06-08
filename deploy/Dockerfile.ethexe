@@ -1,0 +1,5 @@
+FROM --platform=linux/amd64 ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY ethexe-bin /usr/local/bin/ethexe
+RUN chmod +x /usr/local/bin/ethexe
+ENTRYPOINT ["/usr/local/bin/ethexe"]
