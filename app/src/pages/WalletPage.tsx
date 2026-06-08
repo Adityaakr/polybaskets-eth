@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
-import { ArrowDownToLine, ArrowUpFromLine, Copy, Mail, QrCode, Wallet, Zap } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Copy, Loader2, Mail, QrCode, Wallet, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLedger } from "@/contexts/LedgerContext";
@@ -176,11 +176,26 @@ function CollateralCard({ collateral, deposited, walletBalance }: { collateral: 
         )}
       </div>
 
-      <p className="mt-3 text-xs text-muted-foreground">Deposited · available to bet</p>
-      <p className="font-mono text-2xl font-bold tabular-nums">
-        {fromBaseUnits(deposited, collateral)} <span className="text-sm font-normal text-muted-foreground">{meta.symbol}</span>
-      </p>
-      <p className="font-mono text-xs tabular-nums text-muted-foreground">{fmtUsd(depositedUsd)}</p>
+      {(() => {
+        const pendingRaw = collateral === "Eth" ? ledger.pending.eth : ledger.pending.wvara;
+        const syncing = pendingRaw > 0n;
+        return (
+          <>
+            <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              Deposited · available to bet
+              {syncing && (
+                <span className="flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" /> finalizing {fromBaseUnits(pendingRaw, collateral)}
+                </span>
+              )}
+            </p>
+            <p className="font-mono text-2xl font-bold tabular-nums">
+              {fromBaseUnits(deposited, collateral)} <span className="text-sm font-normal text-muted-foreground">{meta.symbol}</span>
+            </p>
+            <p className="font-mono text-xs tabular-nums text-muted-foreground">{fmtUsd(depositedUsd)}</p>
+          </>
+        );
+      })()}
 
       <div className="mt-4 flex rounded-lg border border-border p-0.5">
         {(["deposit", "withdraw"] as const).map((m) => (

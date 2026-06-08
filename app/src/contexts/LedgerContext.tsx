@@ -13,6 +13,8 @@ export interface Balances {
 interface LedgerState {
   chainReady: boolean;
   balances: Balances;
+  /** Optimistic, not-yet-committed deposit amounts (per collateral). >0 = still finalizing. */
+  pending: Balances;
   positions: OnchainPosition[];
   busy: boolean;
   refresh: () => Promise<void>;
@@ -50,10 +52,22 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
   const [balances, setBalances] = useState<Balances>({ eth: 0n, wvara: 0n });
   const balancesRef = useRef(balances);
   useEffect(() => { balancesRef.current = balances; }, [balances]);
+  // Optimistic pending deposits — the tokens already moved on-chain; the ledger credit is still
+  // committing (~30-60s, + relayer for wVARA). Shown immediately so the deposit feels instant,
+  // and cleared automatically once the real ledger reaches the expected post-deposit total.
+  const [pending, setPending] = useState<Balances>({ eth: 0n, wvara: 0n });
+  const targetRef = useRef<Balances>({ eth: 0n, wvara: 0n });
   const [positions, setPositions] = useState<OnchainPosition[]>([]);
   const [busy, setBusy] = useState(false);
 
   const chainReady = isChainConfigured();
+
+  // Effective balances = committed ledger + optimistic pending (no double-count: once the real
+  // balance reaches the target, pending is dropped so effective stays equal to the real value).
+  const effective = useMemo<Balances>(
+    () => ({ eth: balances.eth + pending.eth, wvara: balances.wvara + pending.wvara }),
+    [balances, pending],
+  );
 
   const withClient = useCallback(
     async <T,>(fn: (c: BasketMarketClient) => Promise<T>): Promise<T> => {
@@ -81,6 +95,26 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [chainReady, wallet.address, withClient]);
 
+  // Background auto-refresh — balances/positions always catch up within ~6s of an on-chain commit,
+  // independent of any in-flight action poll (robustness: deposits/bets reflect even if you navigate).
+  useEffect(() => {
+    if (!chainReady || !wallet.authenticated || !wallet.address) return;
+    refresh();
+    const iv = setInterval(refresh, 6000);
+    return () => clearInterval(iv);
+  }, [chainReady, wallet.authenticated, wallet.address, refresh]);
+
+  // Reconcile optimistic pending against the real ledger: once the committed balance reaches the
+  // post-deposit target, drop the pending so the effective balance stays exact.
+  useEffect(() => {
+    setPending((p) => {
+      const next = { ...p };
+      if (p.eth > 0n && balances.eth >= targetRef.current.eth) next.eth = 0n;
+      if (p.wvara > 0n && balances.wvara >= targetRef.current.wvara) next.wvara = 0n;
+      return next.eth === p.eth && next.wvara === p.wvara ? p : next;
+    });
+  }, [balances]);
+
   const run = useCallback(
     async (label: string, fn: (c: BasketMarketClient) => Promise<unknown>) => {
       setBusy(true);
@@ -102,32 +136,31 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
   const deposit = useCallback(
     async (c: Collateral, human: string) => {
       const sym = c === "Eth" ? "ETH" : "wVARA";
+      const key = c === "Eth" ? "eth" : "wvara";
+      const amt = toBaseUnits(human, c);
       const before = c === "Eth" ? balancesRef.current.eth : balancesRef.current.wvara;
-      // Step 1: submit (returns once the Ethereum tx confirms — no blocking on Vara.eth reply).
-      const id = toast.loading(`Submitting ${sym} deposit…`);
+      const id = toast.loading(`Confirming ${sym} deposit…`);
       setBusy(true);
       try {
-        await withClient((client) => {
-          const amt = toBaseUnits(human, c);
-          return c === "Eth" ? client.depositEth(amt) : client.depositWvara(amt);
-        });
+        // Submit — resolves once the Ethereum tx confirms (the tokens have actually moved on-chain).
+        await withClient((client) =>
+          c === "Eth" ? client.depositEth(amt) : client.depositWvara(amt),
+        );
       } catch (e: any) {
         toast.error(`Deposit failed`, { id, description: e?.message?.slice(0, 140) });
         setBusy(false);
         throw e;
       }
-      // Step 2: poll the ledger until the balance reflects it (validator commit + relayer for wVARA).
-      toast.loading(c === "Eth" ? "Crediting your balance…" : "Bridging wVARA to your balance…", { id });
-      let credited = false;
-      for (let i = 0; i < 40; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
-        await refresh();
-        const now = c === "Eth" ? balancesRef.current.eth : balancesRef.current.wvara;
-        if (now > before) { credited = true; break; }
-      }
+      // Optimistic: show the balance immediately. The ledger credit finalizes in the background
+      // (~30-60s, + relayer for wVARA); the reconcile effect drops `pending` once it lands.
+      targetRef.current = { ...targetRef.current, [key]: before + amt };
+      setPending((p) => ({ ...p, [key]: amt }));
       setBusy(false);
-      if (credited) toast.success(`${sym} deposited · ready to bet`, { id });
-      else toast.message(`${sym} deposit submitted — balance will update shortly`, { id });
+      toast.success(
+        c === "Eth" ? `${human} ETH deposited` : `${human} wVARA deposited`,
+        { id, description: "Finalizing on-chain — usable to bet in a moment." },
+      );
+      refresh();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [withClient, refresh],
@@ -207,8 +240,8 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo<LedgerState>(
-    () => ({ chainReady, balances, positions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip }),
-    [chainReady, balances, positions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip],
+    () => ({ chainReady, balances: effective, pending, positions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip }),
+    [chainReady, effective, pending, positions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
