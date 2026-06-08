@@ -38,24 +38,33 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
     | null;
   const isEmbedded = (activeWallet?.walletClientType ?? user?.wallet?.walletClientType) === "privy";
 
-  // Invalidate the cached session when the address OR the Privy sendTransaction binding changes,
-  // so a new signing/sending path (e.g. after an update) rebuilds the session instead of reusing
-  // a stale one that lacks sendTx.
+  // Invalidate the cached session when the address, the Privy sendTransaction binding, OR the
+  // embedded flag changes. The embedded flag matters because Privy can populate walletClientType a
+  // tick AFTER the wallet appears — without this, a session built in that window has no sendTx and
+  // gets cached, so every deposit falls back to the raw provider (4100). Rebuilding on the flip fixes it.
   useEffect(() => {
     sessionRef.current = null;
-  }, [address, sendTransaction]);
+  }, [address, sendTransaction, isEmbedded]);
 
   const getSession = useCallback(async () => {
-    if (sessionRef.current) return sessionRef.current;
     if (!address) throw new Error("Connect a wallet first.");
     const wallet = wallets.find((w) => w.address === address) ?? wallets[0];
     if (!wallet) throw new Error("No wallet available.");
-    // Sign through the wallet's EIP-1193 provider for BOTH embedded and external wallets (personal_sign).
-    const provider = await wallet.getEthereumProvider();
     // VALUE/CONTRACT txns (deposits, approvals): embedded wallets reject the raw-provider
     // eth_sendTransaction with 4100, so route them through Privy's useSendTransaction instead.
     // External wallets leave sendTx undefined and use the viem walletClient (native popup).
-    const isEmbeddedWallet = wallet.walletClientType === "privy";
+    // Detect embedded robustly — the resolved wallet entry can momentarily lack walletClientType,
+    // so also trust the logged-in user's wallet type and the component-level isEmbedded flag.
+    const isEmbeddedWallet =
+      wallet.walletClientType === "privy" ||
+      user?.wallet?.walletClientType === "privy" ||
+      isEmbedded;
+    // Reuse the cached session ONLY if its send path matches the current embedded detection. A
+    // session built before Privy populated the wallet type would lack sendTx; never reuse that for
+    // an embedded wallet (that's the intermittent 4100 — a stale wrong session getting cached).
+    if (sessionRef.current && !!sessionRef.current.sendTx === isEmbeddedWallet) return sessionRef.current;
+    // Sign through the wallet's EIP-1193 provider for BOTH embedded and external wallets (personal_sign).
+    const provider = await wallet.getEthereumProvider();
     const sendTx = isEmbeddedWallet
       ? async (tx: { to: `0x${string}`; data?: `0x${string}`; value?: bigint }) => {
           const { hash } = await sendTransaction(
@@ -75,7 +84,7 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
     const session = await buildSession({ provider: provider as any }, address, sendTx);
     sessionRef.current = session;
     return session;
-  }, [address, wallets, sendTransaction]);
+  }, [address, wallets, sendTransaction, isEmbedded, user]);
 
   const value = useMemo<WalletState>(
     () => ({
