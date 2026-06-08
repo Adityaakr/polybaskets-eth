@@ -1,0 +1,13 @@
+# Railway / Nixpacks build for the PolyBaskets-ETH frontend.
+# Build the Vite app, then serve it (+ /gamma /clob proxies) via server.mjs.
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci --legacy-peer-deps || npm install --legacy-peer-deps"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "node server.mjs"
