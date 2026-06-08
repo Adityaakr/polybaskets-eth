@@ -1,0 +1,45 @@
+[package]
+name = "basket-market"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Package allowing to build WASM binary for the BasketMarket program and IDL file for it"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sails-rs = { workspace = true, features = ["ethexe"] }
+basket-market-app.workspace = true
+
+[dev-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "gtest", "gclient"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+basket-market-app.workspace = true
+basket-market-client.workspace = true
+
+[build-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "build"] }
+basket-market-app.workspace = true
+
+[workspace]
+resolver = "3"
+members = ["app", "client"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["PolyBaskets"]
+edition = "2024"
+rust-version = "1.91"
+repository = "https://github.com/polybaskets/polybaskets-eth"
+license = "MIT"
+keywords = ["gear", "sails", "smart-contracts", "wasm", "no-std"]
+categories = ["cryptography::cryptocurrencies", "no-std", "wasm"]
+
+[workspace.dependencies]
+sails-rs = "1.0.0-beta.3"
+tokio = "1.50.0"
+basket-market-app = { version = "0.1.0", path = "app" }
+basket-market-client = { version = "0.1.0", path = "client" }
