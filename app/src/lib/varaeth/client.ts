@@ -128,35 +128,23 @@ export class BasketMarketClient {
     const sym = collateral === "Eth" ? "ETH" : "wVARA";
 
     // Pre-flight: the pre-confirmation "Accept"s a bet even when it would revert on-chain (e.g.
-    // insufficient deposited balance), which would silently orphan the basket with no position
-    // and no error. So verify the real on-chain ledger balance BEFORE creating anything.
+    // insufficient deposited balance), which would silently orphan the basket with no position.
+    // So verify the real on-chain ledger balance BEFORE submitting.
     const bal = await this.getBalance(this.session.address, collateral).catch(() => 0n);
     if (bal < amount) {
       throw new Error(`Not enough deposited ${sym} to cover this bet — deposit more first.`);
     }
 
     const blob = Array.from(encodeBasketItems(items));
-    const mineActor = addressToActorId(this.session.address).toLowerCase();
-    const beforeIds = new Set((await this.getAllBaskets().catch(() => [])).map((b) => String(b.id)));
-
+    // The new basket's id is the current count. Submit CreateBasket then BetOnBasket back-to-back:
+    // both are PRE-CONFIRMED (~1s each) and the validator chains them on the evolving pre-confirmed
+    // state, so the bet lands on the just-created basket — no waiting for the ~30-60s L1 commit.
+    // (Verified on-chain: create+bet in ~2s, ledger debited.) Committed state shows shortly after.
+    const before = await this.getBasketCount();
+    onProgress?.("Signing your slip…");
     await this.injected("CreateBasket", [name, description, blob]); // pre-confirmed ~1s
-    onProgress?.("Confirming basket on-chain…");
-
-    // wait for MY new basket to commit (a new id, created by me, with this name)
-    let basketId: bigint | null = null;
-    for (let i = 0; i < 40 && basketId == null; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const all = await this.getAllBaskets().catch(() => []);
-      const mine = all
-        .filter((b) => !beforeIds.has(String(b.id)) && b.name === name && b.creator.toLowerCase().endsWith(mineActor.slice(-40)))
-        .sort((a, b) => Number(b.id) - Number(a.id));
-      if (mine.length) basketId = mine[0].id;
-    }
-    if (basketId == null) throw new Error("Basket didn't confirm on-chain — try again.");
-
-    onProgress?.("Placing your bet…");
-    await this.bet(basketId, collateral, amount, indexBps); // pre-confirmed ~1s
-    return basketId;
+    await this.bet(before, collateral, amount, indexBps); // pre-confirmed ~1s, chains on the create
+    return before;
   }
 
   // value movement
