@@ -1,7 +1,8 @@
 // Real Polymarket price history for basket legs (CLOB prices-history), combined into a chart series.
-const DEV = import.meta.env.DEV;
-const gammaBase = DEV ? "/gamma" : (import.meta.env.VITE_GAMMA_PROXY || "https://gamma-api.polymarket.com");
-const clobBase = DEV ? "/clob" : "https://clob.polymarket.com";
+// Relative paths in both dev and prod — proxied by Vite (dev) or server.mjs (Railway).
+// The CLOB API sends no CORS headers, so it MUST go through our proxy, never direct.
+const gammaBase = "/gamma";
+const clobBase = "/clob";
 
 const asArray = (v: unknown): string[] => {
   if (Array.isArray(v)) return v as string[];
