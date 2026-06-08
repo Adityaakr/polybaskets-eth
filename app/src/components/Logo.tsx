@@ -21,10 +21,12 @@ export function Logo({
         style={{ width: size, height: size }}
       />
       {showWordmark && (
-        <span className="text-xl">
-          Poly<span className="text-primary">Baskets</span>
-          <span className="ml-1.5 rounded bg-secondary px-1.5 py-0.5 align-middle font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            vara.eth
+        <span className="relative leading-none">
+          <span className="text-xl">
+            Poly<span className="text-primary">Baskets</span>
+          </span>
+          <span className="absolute -bottom-3 right-0 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            Vara.eth
           </span>
         </span>
       )}
