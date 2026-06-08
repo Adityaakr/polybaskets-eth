@@ -38,6 +38,12 @@ const server = createServer(async (req, res) => {
   try { url = new URL(req.url, "http://localhost"); } catch { res.writeHead(400); return res.end(); }
   const pathname = url.pathname;
 
+  // 0. health check (Railway)
+  if (pathname === "/healthz" || pathname === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ ok: true, service: "polybaskets-eth-web" }));
+  }
+
   // 1. API proxies
   for (const [prefix, host] of Object.entries(PROXIES)) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) {
