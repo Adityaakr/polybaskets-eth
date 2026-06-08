@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { PrivyProvider, usePrivy, useWallets, toViemAccount } from "@privy-io/react-auth";
+import { PrivyProvider, usePrivy, useWallets } from "@privy-io/react-auth";
 import { config, hoodiChain } from "@/config";
 import { buildSession, type VaraEthSession } from "@/lib/varaeth";
 
@@ -47,19 +47,13 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
     if (!address) throw new Error("Connect a wallet first.");
     const wallet = wallets.find((w) => w.address === address) ?? wallets[0];
     if (!wallet) throw new Error("No wallet available.");
-    // Decide embedded vs external from THE WALLET WE'RE SIGNING WITH (robust — not the memoized
-    // activeWallet, which can point at a different connected wallet).
-    const walletIsEmbedded = wallet.walletClientType === "privy";
-    // Embedded (email) wallet → sign via a viem LOCAL account: bets/deposits sign silently, no popup.
-    // External wallet → its EIP-1193 provider (signs with the wallet's own native prompt).
-    let session: VaraEthSession;
-    if (walletIsEmbedded) {
-      const account = await toViemAccount({ wallet });
-      session = await buildSession({ account: account as any }, address);
-    } else {
-      const provider = await wallet.getEthereumProvider();
-      session = await buildSession({ provider: provider as any }, address);
-    }
+    // Sign through the wallet's EIP-1193 provider for BOTH embedded and external wallets. Privy's
+    // toViemAccount is just a wrapper over this same provider (it calls getEthereumProvider() then
+    // personal_sign / secp256k1_sign), so there's no separate "local" signer to use. Embedded wallets
+    // sign via a Privy confirmation popup (showWalletUIs); external wallets via their native prompt.
+    // Both produce the EIP-191 personal_sign the Vara.eth validator expects.
+    const provider = await wallet.getEthereumProvider();
+    const session = await buildSession({ provider: provider as any }, address);
     sessionRef.current = session;
     return session;
   }, [address, wallets]);
