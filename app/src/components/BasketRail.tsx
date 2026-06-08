@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Ticket, Sparkles, Loader2 } from "lucide-react";
+import { X, Ticket, ShoppingBasket, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -93,7 +93,7 @@ export function BasketRail() {
       {draft.items.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
           <span className="grid h-12 w-12 place-items-center rounded-full bg-secondary/60">
-            <Sparkles className="h-5 w-5 text-muted-foreground" />
+            <ShoppingBasket className="h-5 w-5 text-muted-foreground" />
           </span>
           <p className="text-sm font-medium">Your basket is empty</p>
           <p className="text-xs text-muted-foreground">
