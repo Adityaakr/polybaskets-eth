@@ -1,0 +1,146 @@
+
+!@sails: 1.0.0-beta.5
+
+service BasketMarket@0x6d973955a74d05e7 {
+    events {
+        BasketCreated(u64, [u8; 32]),
+        BetPlaced(u64, [u8; 32], u16, u128),
+        Claimed(u64, [u8; 32], u128),
+        Deposited([u8; 32], u16, u128),
+        PoolSeeded(u16, u128),
+        PoolWithdrawn(u16, u128),
+        SettlementFinalized(u64, u64),
+        SettlementProposed(u64, u16, u64),
+        Withdrawn([u8; 32], u16, u128),
+    }
+    functions {
+        /// Place a bet by spending the caller's free ledger balance. No value
+        /// attached. `shares == amount`. The staked amount is debited here; net
+        /// pool accounting happens at claim time.
+        /// 
+        /// `collateral` is `0 = Eth`, `1 = Wvara`.
+        BetOnBasket(basket_id: u64, collateral: u16, amount: u128, index_at_creation_bps: u16) -> u128 throws Error;
+        /// Claim a settled position. Credits the user's ledger with the payout and
+        /// reconciles the house pool: net winnings come OUT of the pool, net losses
+        /// flow INTO the pool. No value attached (credit is to the internal ledger).
+        Claim(basket_id: u64) -> u128 throws Error;
+        /// Create an Active basket. No collateral is attached.
+        /// 
+        /// `items` is a SCALE-encoded `Vec<BasketItem>` blob (ABI-safe `Vec<u8>`).
+        CreateBasket(name: String, description: String, items: [u8]) -> u64 throws Error;
+        /// Credit a user's wVARA ledger balance. **Owner/relayer only.**
+        /// 
+        /// Real wVARA is custodied by the `WvaraVault` Solidity contract on Ethereum.
+        /// Flow: user calls `vault.deposit(amount)` (real ERC-20 transferFrom) → the vault
+        /// emits `Deposited(user, amount)` → the relayer (the owner key) calls this to mirror
+        /// the real, backed deposit into the betting ledger. The on-chain wVARA never lives in
+        /// this program — only its accounting does — so balances are always backed 1:1 by the vault.
+        CreditWvara(user: ActorId, amount: u128) -> u128 throws Error;
+        /// Deposit native ETH; the attached message value is credited to the
+        /// caller's Eth ledger balance.
+        @payable
+        DepositEth() -> u128 throws Error;
+        /// Finalize a proposed settlement once the challenge window has passed.
+        FinalizeSettlement(basket_id: u64) throws Error;
+        /// Free balance for `user` in `collateral` (`0 = Eth`, `1 = Wvara`).
+        @query
+        GetBalance(user: ActorId, collateral: u16) -> u128 throws Error;
+        /// Returns a SCALE-encoded `Vec<(Collateral, u128)>` of all free balances.
+        @query
+        GetBalances(user: ActorId) -> [u8];
+        /// Returns a SCALE-encoded `Basket`. Errors via `unwrap_result` if missing.
+        @query
+        GetBasket(id: u64) -> [u8] throws Error;
+        @query
+        GetBasketCount() -> u64;
+        /// Returns a SCALE-encoded `Config`.
+        @query
+        GetConfig() -> [u8];
+        /// Unprocessed wVARA withdrawals for the relayer to release from the vault.
+        /// Returns a SCALE-encoded `Vec<(u32 index, ActorId user, u128 amount)>`.
+        @query
+        GetPendingWvaraWithdrawals() -> [u8];
+        /// House pool balance for `collateral` (`0 = Eth`, `1 = Wvara`).
+        @query
+        GetPool(collateral: u16) -> u128 throws Error;
+        /// Returns a SCALE-encoded `Vec<Position>` for `user`.
+        @query
+        GetPositions(user: ActorId) -> [u8];
+        /// Returns a SCALE-encoded `Option<Settlement>` for `basket_id`.
+        @query
+        GetSettlement(basket_id: u64) -> [u8];
+        /// Mark a queued wVARA withdrawal as released. **Owner/relayer only** — called after the
+        /// relayer has transferred the real wVARA from the vault to the recipient.
+        MarkWvaraProcessed(index: u32) throws Error;
+        /// Propose a settlement (settler role). Opens the challenge window.
+        /// 
+        /// `item_resolutions` is a SCALE-encoded `Vec<Outcome>` blob (ABI-safe
+        /// `Vec<u8>`).
+        ProposeSettlement(basket_id: u64, item_resolutions: [u8], index_bps: u16) throws Error;
+        /// Seed the ETH house pool with the attached message value (operator only).
+        /// Returns the new pool balance.
+        @payable
+        SeedPoolEth() -> u128 throws Error;
+        /// Seed the wVARA house pool by `amount` (operator only).
+        /// 
+        SeedPoolWvara(amount: u128) -> u128 throws Error;
+        /// Withdraw native ETH: debit the ledger and return the value to the caller
+        /// via the reply (the ethexe value-egress primitive).
+        @returns_value
+        WithdrawEth(amount: u128) throws Error;
+        /// Withdraw ETH from the house pool back to the operator (operator only).
+        @returns_value
+        WithdrawPoolEth(amount: u128) throws Error;
+        /// Withdraw wVARA from the house pool back to the operator (operator only).
+        /// Debits the pool and queues a vault release for the relayer (returns queue index).
+        WithdrawPoolWvara(amount: u128) -> u32 throws Error;
+        /// Withdraw wVARA: debit the ledger and queue a release for the relayer.
+        /// 
+        /// The real tokens live in the `WvaraVault`, so we can't pay the user from inside the
+        /// program. Instead we debit the ledger and enqueue `(user, amount)`; the relayer polls
+        /// `GetPendingWvaraWithdrawals`, calls `vault.release(user, amount)` (real ERC-20 transfer),
+        /// then marks the entry processed. Returns the queue index of the pending withdrawal.
+        WithdrawWvara(amount: u128) -> u32 throws Error;
+    }
+    types {
+        enum Error {
+            Unauthorized,
+            ZeroValue,
+            InsufficientBalance,
+            PoolInsufficient,
+            BasketNotFound,
+            BasketNotActive,
+            NoItems,
+            TooManyItems,
+            InvalidWeights,
+            DuplicateBasketItem,
+            NameTooLong,
+            DescriptionTooLong,
+            SettlementNotFound,
+            SettlementNotProposed,
+            SettlementAlreadyExists,
+            SettlementNotFinalized,
+            ChallengeDeadlineNotPassed,
+            InvalidIndexAtCreation,
+            AlreadyClaimed,
+            NothingToClaim,
+            PositionNotFound,
+            MathOverflow,
+            WvaraTransferFailed,
+            EthTransferFailed,
+            UnsupportedCollateral,
+            InvalidItemsPayload,
+        }
+    }
+}
+
+program BasketMarket {
+    constructors {
+        /// Constructor. `owner` is set to the message source (the deployer/operator).
+        /// Named `init` because `new` is a reserved word on the Solidity ABI path.
+        Init(settler_role: ActorId, liveness_seconds: u64);
+    }
+    services {
+        BasketMarket@0x6d973955a74d05e7,
+    }
+}
