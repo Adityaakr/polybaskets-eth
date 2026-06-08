@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Zap, Mail, Layers } from "lucide-react";
+import { ArrowRight, Zap, TrendingUp, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConnectButton } from "@/components/ConnectButton";
 import { Logo } from "@/components/Logo";
@@ -43,7 +43,7 @@ export default function LandingPage() {
         </h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground">
           Stack Polymarket outcomes into a weighted basket and bet the bundle as one position —
-          settled on Vara.eth. Email login, deposit ETH or wVARA, gasless pre-confirmed bets.
+          settled on Vara.eth. Connect a wallet, deposit ETH or wVARA, gasless pre-confirmed bets.
         </p>
 
         <div className="mt-7 flex items-center justify-center gap-3">
@@ -57,8 +57,8 @@ export default function LandingPage() {
         <div className="mx-auto mt-16 grid max-w-3xl gap-4 text-left sm:grid-cols-3">
           {[
             { icon: Layers, t: "Build your stack", d: "Bundle many Polymarket outcomes into one weighted basket." },
-            { icon: Zap, t: "Stack the odds", d: "Every leg compounds — small stake, outsized payout." },
-            { icon: Mail, t: "One-tap entry", d: "Email login, gasless bets. No extension, no seed phrase." },
+            { icon: TrendingUp, t: "Stack the odds", d: "Every leg compounds — small stake, outsized payout." },
+            { icon: Zap, t: "Gasless plays", d: "Bets are pre-confirmed injected messages — just sign, no gas." },
           ].map(({ icon: Icon, t, d }) => (
             <div key={t} className="rounded-xl border border-border bg-card p-5">
               <Icon className="h-6 w-6 text-primary" aria-hidden />

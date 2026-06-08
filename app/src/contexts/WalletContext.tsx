@@ -96,11 +96,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     <PrivyProvider
       appId={config.privyAppId}
       config={{
-        loginMethods: ["email", "wallet"],
+        // External wallets only. Email creates an embedded wallet that starts empty, and gas
+        // can't be sponsored on Hoodi — so those wallets can't deposit/bet. External wallets
+        // (e.g. MetaMask) already hold Hoodi ETH/wVARA and sign + pay gas themselves.
+        loginMethods: ["wallet"],
         embeddedWallets: {
-          createOnLogin: "users-without-wallets",
-          // Sign injected bets/deposits silently — no confirmation popup for email wallets.
-          showWalletUIs: false,
+          createOnLogin: "off",
         },
         // Coinbase Smart Wallet doesn't support Hoodi — use EOA-only to avoid unsupported-chain noise.
         externalWallets: { coinbaseWallet: { connectionOptions: "eoaOnly" } },
