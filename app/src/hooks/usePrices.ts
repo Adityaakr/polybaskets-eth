@@ -41,8 +41,13 @@ export const usdToToken = (usd: number, prices: Prices | undefined, c: Collatera
 };
 
 /** "$1,052.64" */
-export const fmtUsd = (n: number): string =>
-  `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** "$1,052.64" — but sub-cent values (e.g. 1 wVARA ≈ $0.00057) keep precision instead of "$0.00". */
+export const fmtUsd = (n: number): string => {
+  if (!Number.isFinite(n)) return "$0.00";
+  const abs = Math.abs(n);
+  const maxFrac = abs > 0 && abs < 1 ? (abs < 0.01 ? 6 : 4) : 2;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: maxFrac })}`;
+};
 
 /** Trim a token amount for display (more dp for tiny ETH, fewer for big wVARA). */
 export const fmtToken = (n: number, c: Collateral): string => {
