@@ -27,6 +27,9 @@ export default defineConfig(() => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       buffer: "buffer",
+      // sails-js pulls in @gear-js/api (Gear-node query path) which this Vara.eth app never uses
+      // and isn't installed when building app/ in isolation (Railway). Stub it out.
+      "@gear-js/api": path.resolve(__dirname, "./src/stubs/gear-js-api.ts"),
     },
   },
   optimizeDeps: {
