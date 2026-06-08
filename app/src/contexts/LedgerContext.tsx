@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useWallet } from "./WalletContext";
-import { BasketMarketClient, type OnchainPosition } from "@/lib/varaeth";
+import { BasketMarketClient, type OnchainPosition, type OnchainBasket } from "@/lib/varaeth";
 import { toBaseUnits } from "@/lib/varaeth/format";
 import { isChainConfigured, type Collateral } from "@/config";
 
@@ -17,6 +17,9 @@ interface LedgerState {
   pending: Balances;
   /** Real on-chain positions merged with optimistic (just-bet) ones, so a fresh bet shows instantly. */
   positions: OnchainPosition[];
+  /** Just-created baskets not yet committed on-chain, keyed by id — lets the basket page render
+   *  immediately instead of showing a "confirming…" spinner for ~30-60s. */
+  optimisticBaskets: Record<string, OnchainBasket>;
   busy: boolean;
   refresh: () => Promise<void>;
   deposit: (c: Collateral, human: string) => Promise<void>;
@@ -63,6 +66,9 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
   // stake immediately, keyed by basket id. The real on-chain position commits ~30-60s later and
   // replaces it (reconcile effect drops the optimistic entry once the real one appears).
   const [optimistic, setOptimistic] = useState<Record<string, OnchainPosition>>({});
+  // Just-created baskets, shown immediately while the real one commits (~30-60s). Cleared by the
+  // basket page once the committed basket loads (real always wins; a stale entry is harmless).
+  const [optimisticBaskets, setOptimisticBaskets] = useState<Record<string, OnchainBasket>>({});
   const [busy, setBusy] = useState(false);
 
   const chainReady = isChainConfigured();
@@ -89,6 +95,27 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
         [String(basketId)]: {
           basket_id: basketId, user: wallet.address as `0x${string}`, collateral: c,
           shares: amount, index_at_creation_bps: indexBps, claimed: false,
+        },
+      }));
+    },
+    [wallet.address],
+  );
+
+  const addOptimisticBasket = useCallback(
+    (
+      id: bigint,
+      name: string,
+      description: string,
+      items: { poly_market_id: string; poly_slug: string; weight_bps: number; selected_outcome: "Yes" | "No" }[],
+    ) => {
+      if (!wallet.address) return;
+      setOptimisticBaskets((m) => ({
+        ...m,
+        [String(id)]: {
+          id, creator: wallet.address as `0x${string}`, name, description,
+          items: items.map((it) => ({ ...it })),
+          created_at: BigInt(Date.now()),
+          status: "Active",
         },
       }));
     },
@@ -262,8 +289,11 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
             toast.loading(msg, { id }),
           ),
         );
-        // Show the stake instantly in positions; real one commits ~30-60s later and replaces it.
-        if (newId != null) addOptimisticPosition(newId, c, toBaseUnits(human, c), indexBps);
+        // Show the stake AND the basket instantly; the real ones commit ~30-60s later and replace them.
+        if (newId != null) {
+          addOptimisticPosition(newId, c, toBaseUnits(human, c), indexBps);
+          addOptimisticBasket(newId, name, description, items);
+        }
         toast.success("⚡ Slip placed", {
           id,
           description: "Your bet is in — it'll appear in My Baskets shortly.",
@@ -278,12 +308,12 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
         setBusy(false);
       }
     },
-    [withClient, refresh, addOptimisticPosition],
+    [withClient, refresh, addOptimisticPosition, addOptimisticBasket],
   );
 
   const value = useMemo<LedgerState>(
-    () => ({ chainReady, balances: effective, pending, positions: mergedPositions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip }),
-    [chainReady, effective, pending, mergedPositions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip],
+    () => ({ chainReady, balances: effective, pending, positions: mergedPositions, optimisticBaskets, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip }),
+    [chainReady, effective, pending, mergedPositions, optimisticBaskets, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

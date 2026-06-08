@@ -60,6 +60,12 @@ export default function BasketPage() {
     };
   }, [id, wallet]);
 
+  // Render the just-created basket instantly from the optimistic store while the real one commits
+  // (~30-60s), instead of a blocking spinner. The poll above swaps in the committed basket when ready.
+  const optimisticBasket = id ? ledger.optimisticBaskets[id] ?? null : null;
+  const shownBasket = basket ?? optimisticBasket;
+  const finalizing = !basket && !!shownBasket;
+
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <Button asChild variant="ghost" size="sm" className="gap-1">
@@ -70,7 +76,7 @@ export default function BasketPage() {
 
       {loading ? (
         <Skeleton className="h-48 rounded-2xl" />
-      ) : !basket && confirming ? (
+      ) : !shownBasket && confirming ? (
         <div className="rounded-2xl border border-border bg-card p-8 text-center">
           <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
           <p className="mt-3 font-semibold">Confirming your slip on-chain…</p>
@@ -78,7 +84,7 @@ export default function BasketPage() {
             Your bet is pre-confirmed. The basket settles onto the chain in ~30–60s — this updates automatically.
           </p>
         </div>
-      ) : !basket ? (
+      ) : !shownBasket ? (
         <div className="rounded-2xl border border-border bg-card p-8 text-center">
           <Layers className="mx-auto h-8 w-8 text-muted-foreground" />
           <p className="mt-3 font-semibold">Basket #{id}</p>
@@ -93,20 +99,26 @@ export default function BasketPage() {
           {/* header */}
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-2xl font-bold">{basket.name}</h1>
+              <h1 className="text-2xl font-bold">{shownBasket.name}</h1>
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                #{String(basket.id)} · {basket.items.length} legs
+                #{String(shownBasket.id)} · {shownBasket.items.length} legs
               </p>
             </div>
-            <StatusPill status={basket.status} />
+            {finalizing ? (
+              <span className="flex items-center gap-1.5 rounded-full bg-warning/15 px-2.5 py-1 text-xs font-medium text-warning">
+                <Loader2 className="h-3 w-3 animate-spin" /> Finalizing
+              </span>
+            ) : (
+              <StatusPill status={shownBasket.status} />
+            )}
           </div>
 
           {/* the user's live position — stake, value, P&L, claim/settlement.
               Fall back to the ledger's optimistic position so a just-placed bet shows instantly,
               before the committed on-chain position (~30-60s) arrives via this page's own poll. */}
           <PositionPanel
-            basket={basket}
-            position={position ?? ledger.positions.find((p) => String(p.basket_id) === String(basket.id)) ?? null}
+            basket={shownBasket}
+            position={position ?? ledger.positions.find((p) => String(p.basket_id) === String(shownBasket.id)) ?? null}
             settlement={settlement}
           />
 
@@ -118,7 +130,7 @@ export default function BasketPage() {
               <span className="text-xs text-muted-foreground">· combined basket vs. each leg</span>
             </div>
             <BasketChart
-              legs={basket.items.map((it) => ({
+              legs={shownBasket.items.map((it) => ({
                 slug: it.poly_slug || it.poly_market_id,
                 outcome: it.selected_outcome,
                 weightBps: it.weight_bps,
@@ -132,7 +144,7 @@ export default function BasketPage() {
               Legs
             </p>
             <ul className="divide-y divide-border/60">
-              {basket.items.map((it, i) => (
+              {shownBasket.items.map((it, i) => (
                 <li key={i} className="flex items-center gap-3 px-5 py-3.5 text-sm">
                   <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: LEG_COLORS[i % LEG_COLORS.length] }} />
                   <span className="min-w-0 flex-1 truncate font-medium">
