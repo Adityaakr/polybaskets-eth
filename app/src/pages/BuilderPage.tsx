@@ -9,6 +9,8 @@ import { useBasketDraft } from "@/contexts/BasketContext";
 import { useLedger } from "@/contexts/LedgerContext";
 import { useWallet } from "@/contexts/WalletContext";
 import { basketEntryIndex, basketMaxMultiplier, fmtMultiplier, fmtOdds, toCents } from "@/lib/odds";
+import { usePrices, priceOf, usdToToken, fmtUsd, fmtToken } from "@/hooks/usePrices";
+import { fromBaseUnits } from "@/lib/varaeth/format";
 import { COLLATERALS, type Collateral } from "@/config";
 import { cn } from "@/lib/utils";
 
@@ -27,11 +29,22 @@ export default function BuilderPage() {
     [draft.items],
   );
   const maxMult = useMemo(() => basketMaxMultiplier(legs), [legs]);
-  const stakeNum = Number(stake) || 0;
-  const maxPayout = stakeNum * maxMult;
+  // Same model as the desktop rail: the Stake input is USD. Convert it to collateral units to bet,
+  // and show the max payout in USD (stake × max multiplier). This keeps the number you type, the
+  // amount actually wagered, and the payout all in the same unit.
+  const { data: prices } = usePrices();
+  const px = priceOf(prices, collateral);
+  const sym = collateral === "Eth" ? "ETH" : "wVARA";
+  const stakeNum = Number(stake) || 0; // USD
+  const tokenAmount = usdToToken(stakeNum, prices, collateral); // collateral units to actually bet
+  const maxPayout = stakeNum * maxMult; // USD
+  const depositedRaw = collateral === "Eth" ? ledger.balances.eth : ledger.balances.wvara;
+  const depositedTok = Number(fromBaseUnits(depositedRaw, collateral, 18));
+  const enoughBalance = depositedTok >= tokenAmount && tokenAmount > 0;
 
   const canPlace =
-    draft.items.length > 0 && draft.weightsValid && draft.name.trim().length > 0 && stakeNum > 0;
+    draft.items.length > 0 && draft.weightsValid && draft.name.trim().length > 0 &&
+    stakeNum > 0 && px > 0 && enoughBalance;
 
   async function placeSlip() {
     if (!wallet.authenticated) return wallet.login();
@@ -43,10 +56,12 @@ export default function BuilderPage() {
         weight_bps: i.weightBps,
         selected_outcome: (i.outcome === "YES" ? "Yes" : "No") as "Yes" | "No",
       }));
-      const id = await ledger.createBasket(draft.name, draft.description, items);
+      const idxBps = Math.max(1, Math.min(10000, Math.round(basketEntryIndex(legs) * 10000)));
+      // Bet the USD-converted token amount (same as desktop), via the atomic create+bet flow.
+      const id = await ledger.placeSlip(draft.name, draft.description, items, collateral, String(tokenAmount), idxBps, {
+        onView: (bid) => navigate(`/basket/${bid}`),
+      });
       if (id != null) {
-        const idxBps = Math.max(1, Math.min(10000, Math.round(basketEntryIndex(legs) * 10000)));
-        await ledger.placeBet(id, collateral, stake, idxBps);
         draft.clear();
         navigate(`/basket/${id}`);
       }
@@ -177,13 +192,28 @@ export default function BuilderPage() {
         </div>
 
         <div>
-          <label className="mb-1.5 block text-xs text-muted-foreground">Stake</label>
-          <Input
-            value={stake}
-            onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, ""))}
-            inputMode="decimal"
-            className="font-mono text-lg tabular-nums"
-          />
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <label className="text-xs text-muted-foreground">Stake</label>
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {px > 0 ? `1 ${sym} ≈ ${fmtUsd(px)}` : "loading price…"}
+            </span>
+          </div>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base text-muted-foreground">$</span>
+            <Input
+              value={stake}
+              onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, ""))}
+              inputMode="decimal"
+              aria-label="Stake in USD"
+              className="pl-7 font-mono text-lg tabular-nums"
+            />
+          </div>
+          <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+            ≈ {fmtToken(tokenAmount, collateral)} {sym}
+            {stakeNum > 0 && !enoughBalance && px > 0 && (
+              <span className="text-warning"> · not enough deposited {sym}</span>
+            )}
+          </p>
         </div>
 
         <div className="rounded-xl bg-secondary/50 p-4">
