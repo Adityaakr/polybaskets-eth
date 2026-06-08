@@ -69,7 +69,7 @@ export function BasketRail() {
   }
 
   return (
-    <aside className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card">
+    <aside className="flex max-h-[calc(100vh-6rem)] flex-col overflow-y-auto rounded-2xl border border-border bg-card">
       <header className="flex items-center justify-between border-b border-border/70 px-4 py-3">
         <span className="flex items-center gap-2 text-sm font-semibold">
           <Ticket className="h-4 w-4 text-primary" />
@@ -91,7 +91,7 @@ export function BasketRail() {
       </header>
 
       {draft.items.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+        <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 px-6 py-12 text-center">
           <span className="grid h-12 w-12 place-items-center rounded-full bg-secondary/60">
             <ShoppingBasket className="h-5 w-5 text-muted-foreground" />
           </span>
@@ -102,23 +102,30 @@ export function BasketRail() {
         </div>
       ) : (
         <>
-          {/* legs */}
-          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-3">
+          {/* legs — render in full (no inner scroll window); the whole rail scrolls if it's tall */}
+          <div className="space-y-2 px-3 py-3">
             {draft.items.map((i) => (
               <div
                 key={i.marketId}
-                className="group flex items-start gap-2 rounded-lg border border-border/60 bg-secondary/30 p-2.5"
+                className="group flex items-start gap-2.5 rounded-lg border border-border bg-secondary/70 p-3 shadow-sm transition-colors hover:border-primary/50"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 text-xs font-medium leading-snug">{i.question}</p>
-                  <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px]">
-                    <span className={i.outcome === "YES" ? "font-bold text-primary" : "font-bold text-destructive"}>
+                  <p className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{i.question}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px]">
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                        i.outcome === "YES"
+                          ? "bg-primary/20 text-primary"
+                          : "bg-destructive/20 text-destructive",
+                      )}
+                    >
                       {i.outcome}
                     </span>
                     <span className="text-muted-foreground">{toCents(i.currentProb ?? 0.5)}</span>
-                    <span className="text-accent">· {Math.round(i.weightBps / 100)}%</span>
-                    <span className="opacity-60">{fmtOdds(i.currentProb ?? 0.5)}</span>
-                  </p>
+                    <span className="font-semibold text-accent">{Math.round(i.weightBps / 100)}% weight</span>
+                    <span className="text-muted-foreground opacity-70">{fmtOdds(i.currentProb ?? 0.5)}</span>
+                  </div>
                 </div>
                 <button
                   onClick={() => draft.removeLeg(i.marketId)}
