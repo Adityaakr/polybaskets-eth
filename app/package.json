@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "start:bots": "node scripts/bots.mjs",
+    "start:relayer": "node scripts/relayer.mjs",
+    "start:settler": "node scripts/settler.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
