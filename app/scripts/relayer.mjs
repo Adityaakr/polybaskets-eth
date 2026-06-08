@@ -11,19 +11,17 @@ import { EthereumClient, VaraEthApi, WsVaraEthProvider, getMirrorClient } from "
 import { SailsProgram } from "sails-js";
 import { SailsIdlParser } from "sails-js/parser";
 import { TypeRegistry } from "@polkadot/types";
+import { cfg, assertConfigured } from "./_env.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const env = {};
-for (const l of readFileSync(resolve(root, "deploy/.env.deploy"), "utf8").split("\n")) {
-  const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.+?)\s*$/);
-  if (m && !l.trim().startsWith("#")) env[m[1]] = m[2];
-}
-const appEnv = readFileSync(resolve(root, "app/.env"), "utf8");
-const PROGRAM = appEnv.match(/^VITE_PROGRAM_ID=(0x[0-9a-fA-F]+)/m)[1];
-const VAULT = env.WVARA_VAULT;
-const ETH_RPC = "https://ethereum-hoodi-rpc.publicnode.com";
-const { ROUTER, VARA_ETH_WS } = env;
-const STATE = resolve(root, "deploy/relayer-state.json");
+assertConfigured();
+const PROGRAM = cfg.PROGRAM_ID;
+const VAULT = cfg.WVARA_VAULT;
+const ETH_RPC = cfg.ETH_RPC;
+const ROUTER = cfg.ROUTER, VARA_ETH_WS = cfg.VARA_ETH_WS;
+// On Railway the filesystem is ephemeral — set RELAYER_STATE_PATH to a mounted volume to
+// persist the processed-deposit cursor across restarts (else it re-derives from latest block).
+const STATE = process.env.RELAYER_STATE_PATH || resolve(root, "deploy/relayer-state.json");
 const log = (...a) => console.log("[relayer]", new Date().toISOString().slice(11, 19), ...a);
 
 const hoodi = defineChain({ id: 560048, name: "Hoodi", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [ETH_RPC] } } });
@@ -31,7 +29,7 @@ const reg = new TypeRegistry();
 const toActorId = (addr) => "0x" + addr.replace(/^0x/, "").toLowerCase().padStart(64, "0");
 const toAddress = (actorId) => "0x" + actorId.replace(/^0x/, "").padStart(64, "0").slice(24);
 
-const account = privateKeyToAccount(env.DEPLOYER_PRIVATE_KEY);
+const account = privateKeyToAccount(cfg.DEPLOYER_PRIVATE_KEY);
 const publicClient = createPublicClient({ chain: hoodi, transport: http(ETH_RPC) });
 const walletClient = createWalletClient({ account, chain: hoodi, transport: http(ETH_RPC) });
 const eth = new EthereumClient(publicClient, walletClient, ROUTER);

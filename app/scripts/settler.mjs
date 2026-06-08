@@ -12,17 +12,14 @@ import { EthereumClient, VaraEthApi, WsVaraEthProvider, getMirrorClient } from "
 import { SailsProgram } from "sails-js";
 import { SailsIdlParser } from "sails-js/parser";
 import { TypeRegistry } from "@polkadot/types";
+import { cfg, assertConfigured } from "./_env.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const env = {};
-for (const l of readFileSync(resolve(root, "deploy/.env.deploy"), "utf8").split("\n")) {
-  const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.+?)\s*$/);
-  if (m && !l.trim().startsWith("#")) env[m[1]] = m[2];
-}
-const PROGRAM = readFileSync(resolve(root, "app/.env"), "utf8").match(/^VITE_PROGRAM_ID=(0x[0-9a-fA-F]+)/m)[1];
-const ETH_RPC = "https://ethereum-hoodi-rpc.publicnode.com";
+assertConfigured();
+const PROGRAM = cfg.PROGRAM_ID;
+const ETH_RPC = cfg.ETH_RPC;
 const GAMMA = "https://gamma-api.polymarket.com";
-const { ROUTER, VARA_ETH_WS } = env;
+const ROUTER = cfg.ROUTER, VARA_ETH_WS = cfg.VARA_ETH_WS;
 const POLL_MS = 30_000;
 const log = (...a) => console.log("[settler]", new Date().toISOString().slice(11, 19), ...a);
 
@@ -37,7 +34,7 @@ reg.register({
   Settlement: { basket_id: "u64", proposer: "[u8;32]", item_resolutions: "Vec<Outcome>", index_bps: "u16", proposed_at: "u64", challenge_deadline: "u64", finalized_at: "Option<u64>", status: "SettlementStatus" },
 });
 
-const account = privateKeyToAccount(env.DEPLOYER_PRIVATE_KEY);
+const account = privateKeyToAccount(cfg.DEPLOYER_PRIVATE_KEY);
 const publicClient = createPublicClient({ chain: hoodi, transport: http(ETH_RPC) });
 const walletClient = createWalletClient({ account, chain: hoodi, transport: http(ETH_RPC) });
 const eth = new EthereumClient(publicClient, walletClient, ROUTER);
