@@ -38,10 +38,12 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
     | null;
   const isEmbedded = (activeWallet?.walletClientType ?? user?.wallet?.walletClientType) === "privy";
 
-  // invalidate cached session when the address changes
+  // Invalidate the cached session when the address OR the Privy sendTransaction binding changes,
+  // so a new signing/sending path (e.g. after an update) rebuilds the session instead of reusing
+  // a stale one that lacks sendTx.
   useEffect(() => {
     sessionRef.current = null;
-  }, [address]);
+  }, [address, sendTransaction]);
 
   const getSession = useCallback(async () => {
     if (sessionRef.current) return sessionRef.current;
@@ -68,6 +70,8 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
           return hash;
         }
       : undefined;
+    // eslint-disable-next-line no-console
+    console.info("[wallet] session built", { embedded: isEmbeddedWallet, hasSendTx: !!sendTx, walletClientType: wallet.walletClientType });
     const session = await buildSession({ provider: provider as any }, address, sendTx);
     sessionRef.current = session;
     return session;
