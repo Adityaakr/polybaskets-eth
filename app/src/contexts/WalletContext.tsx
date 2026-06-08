@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { PrivyProvider, usePrivy, useWallets } from "@privy-io/react-auth";
+import { PrivyProvider, usePrivy, useWallets, useSendTransaction } from "@privy-io/react-auth";
 import { config, hoodiChain } from "@/config";
 import { buildSession, type VaraEthSession } from "@/lib/varaeth";
 
@@ -29,6 +29,7 @@ export const useWallet = () => {
 function PrivyWallet({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets } = useWallets();
+  const { sendTransaction } = useSendTransaction();
   const sessionRef = useRef<VaraEthSession | null>(null);
 
   const activeWallet = wallets.find((w) => w.address === user?.wallet?.address) ?? wallets[0];
@@ -47,16 +48,30 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
     if (!address) throw new Error("Connect a wallet first.");
     const wallet = wallets.find((w) => w.address === address) ?? wallets[0];
     if (!wallet) throw new Error("No wallet available.");
-    // Sign through the wallet's EIP-1193 provider for BOTH embedded and external wallets. Privy's
-    // toViemAccount is just a wrapper over this same provider (it calls getEthereumProvider() then
-    // personal_sign / secp256k1_sign), so there's no separate "local" signer to use. Embedded wallets
-    // sign via a Privy confirmation popup (showWalletUIs); external wallets via their native prompt.
-    // Both produce the EIP-191 personal_sign the Vara.eth validator expects.
+    // Sign through the wallet's EIP-1193 provider for BOTH embedded and external wallets (personal_sign).
     const provider = await wallet.getEthereumProvider();
-    const session = await buildSession({ provider: provider as any }, address);
+    // VALUE/CONTRACT txns (deposits, approvals): embedded wallets reject the raw-provider
+    // eth_sendTransaction with 4100, so route them through Privy's useSendTransaction instead.
+    // External wallets leave sendTx undefined and use the viem walletClient (native popup).
+    const isEmbeddedWallet = wallet.walletClientType === "privy";
+    const sendTx = isEmbeddedWallet
+      ? async (tx: { to: `0x${string}`; data?: `0x${string}`; value?: bigint }) => {
+          const { hash } = await sendTransaction(
+            {
+              to: tx.to,
+              data: tx.data,
+              value: tx.value !== undefined ? (`0x${tx.value.toString(16)}` as `0x${string}`) : undefined,
+              chainId: hoodiChain.id,
+            },
+            { uiOptions: { showWalletUIs: true } },
+          );
+          return hash;
+        }
+      : undefined;
+    const session = await buildSession({ provider: provider as any }, address, sendTx);
     sessionRef.current = session;
     return session;
-  }, [address, wallets]);
+  }, [address, wallets, sendTransaction]);
 
   const value = useMemo<WalletState>(
     () => ({

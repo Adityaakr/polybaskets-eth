@@ -17,6 +17,11 @@ export interface Eip1193 {
   request(args: { method: string; params?: unknown[] | object }): Promise<unknown>;
 }
 
+/** Send a raw transaction. For embedded (Privy) wallets this routes through Privy's useSendTransaction
+ *  (the raw EIP-1193 eth_sendTransaction returns 4100 for embedded wallets). External wallets leave it
+ *  undefined and use the viem walletClient. Returns the tx hash. */
+export type SendTx = (tx: { to: `0x${string}`; data?: `0x${string}`; value?: bigint }) => Promise<`0x${string}`>;
+
 export interface VaraEthSession {
   address: `0x${string}`;
   publicClient: PublicClient;
@@ -24,6 +29,8 @@ export interface VaraEthSession {
   ethereumClient: EthereumClient;
   api: VaraEthApi;
   program: SailsProgram;
+  /** Present for embedded wallets — send value/contract txns via Privy instead of the raw provider. */
+  sendTx?: SendTx;
 }
 
 let cachedProgram: SailsProgram | null = null;
@@ -89,6 +96,7 @@ async function ensureHoodi(provider: Eip1193) {
 export async function buildSession(
   source: { provider: Eip1193; account?: undefined } | { account: Account; provider?: undefined },
   address: `0x${string}`,
+  sendTx?: SendTx,
 ): Promise<VaraEthSession> {
   if (!config.routerAddress || !config.programId) {
     throw new ChainNotReadyError(
@@ -132,5 +140,5 @@ export async function buildSession(
 
   const program = await loadProgram();
 
-  return { address, publicClient, walletClient, ethereumClient, api, program };
+  return { address, publicClient, walletClient, ethereumClient, api, program, sendTx };
 }

@@ -1,4 +1,5 @@
 import { getMirrorClient } from "@vara-eth/api";
+import { encodeFunctionData } from "viem";
 import { config, type Collateral } from "@/config";
 import { type VaraEthSession } from "./session";
 import {
@@ -13,6 +14,14 @@ import {
 export type { ItemInput } from "./codec";
 
 const SVC = "BasketMarket";
+
+// Minimal Mirror ABI — just sendMessage(payload, callReply), used to encode classic value txns
+// for embedded wallets routed through Privy. Matches @vara-eth's own MirrorClient.sendMessage.
+const MIRROR_SEND_ABI = [{
+  type: "function", name: "sendMessage", stateMutability: "payable",
+  inputs: [{ name: "payload", type: "bytes" }, { name: "callReply", type: "bool" }],
+  outputs: [{ name: "", type: "bytes32" }],
+}] as const;
 
 export interface OnchainBasketItem {
   poly_market_id: string;
@@ -82,6 +91,15 @@ export class BasketMarketClient {
   private async classic(name: string, args: unknown[], value: bigint) {
     const f = this.fn(name);
     const payload = f.encodePayload(...args);
+    // Embedded wallet → encode the Mirror.sendMessage call and send via Privy (raw-provider
+    // eth_sendTransaction is rejected with 4100 for embedded wallets). The Mirror contract address
+    // is the program id. callReply=false (same as @vara-eth's own MirrorClient.sendMessage).
+    if (this.session.sendTx) {
+      const data = encodeFunctionData({ abi: MIRROR_SEND_ABI, functionName: "sendMessage", args: [payload as `0x${string}`, false] });
+      const hash = await this.session.sendTx({ to: config.programId, data, value });
+      try { await this.session.publicClient.waitForTransactionReceipt({ hash }); } catch { /* best effort */ }
+      return { hash };
+    }
     const mirror = getMirrorClient(config.programId, this.session.walletClient, this.session.publicClient);
     const tx = await mirror.sendMessage(payload, value);
     // Confirm the Ethereum tx (~1 block) and return — DON'T block on the Vara.eth reply, which
@@ -161,6 +179,13 @@ export class BasketMarketClient {
       type: "function", name: "deposit", stateMutability: "nonpayable",
       inputs: [{ name: "amount", type: "uint256" }], outputs: [{ type: "uint256" }],
     }] as const;
+    // Embedded → Privy sendTransaction (raw eth_sendTransaction → 4100); external → walletClient.
+    if (this.session.sendTx) {
+      const data = encodeFunctionData({ abi: VAULT, functionName: "deposit", args: [amount] });
+      const hash = await this.session.sendTx({ to: config.wvaraVault, data });
+      await this.session.publicClient.waitForTransactionReceipt({ hash });
+      return { hash };
+    }
     const hash = await this.session.walletClient.writeContract({
       address: config.wvaraVault, abi: VAULT, functionName: "deposit", args: [amount],
       account: this.session.address, chain: undefined,
@@ -178,6 +203,13 @@ export class BasketMarketClient {
       type: "function", name: "approve", stateMutability: "nonpayable",
       inputs: [{ name: "s", type: "address" }, { name: "v", type: "uint256" }], outputs: [{ type: "bool" }],
     }] as const;
+    // Embedded → Privy sendTransaction (raw eth_sendTransaction → 4100); external → walletClient.
+    if (this.session.sendTx) {
+      const data = encodeFunctionData({ abi: ERC20, functionName: "approve", args: [spender, amount] });
+      const hash = await this.session.sendTx({ to: token, data });
+      await this.session.publicClient.waitForTransactionReceipt({ hash });
+      return;
+    }
     const hash = await this.session.walletClient.writeContract({
       address: token, abi: ERC20, functionName: "approve", args: [spender, amount],
       account: this.session.address, chain: undefined,
