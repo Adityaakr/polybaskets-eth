@@ -71,9 +71,18 @@ export default function MyBasketsPage() {
     return () => clearInterval(iv);
   }, [load]);
 
+  // Fold in optimistic (just-placed) positions so a fresh bet shows in the Positions tab
+  // immediately, before this page's own committed fetch catches up (~30-60s).
+  const mergedItems = useMemo<Item[]>(() => {
+    const optByBasket = new Map(ledger.positions.map((p) => [String(p.basket_id), p]));
+    return items.map((it) =>
+      it.position ? it : { ...it, position: optByBasket.get(String(it.basket.id)) ?? null },
+    );
+  }, [items, ledger.positions]);
+
   // portfolio summary (doesn't need live odds)
   const summary = useMemo(() => {
-    const withPos = items.filter((i) => i.position);
+    const withPos = mergedItems.filter((i) => i.position);
     let stakedUsd = 0, claimableUsd = 0, claimableCount = 0;
     for (const it of withPos) {
       const c = it.position!.collateral as Collateral;
@@ -89,13 +98,13 @@ export default function MyBasketsPage() {
       usdValue(Number(fromBaseUnits(ledger.balances.eth, "Eth", 18)), prices, "Eth") +
       usdValue(Number(fromBaseUnits(ledger.balances.wvara, "Wvara", 18)), prices, "Wvara");
     return { stakedUsd, claimableUsd, claimableCount, depositedUsd, openCount: withPos.length };
-  }, [items, prices, ledger.balances]);
+  }, [mergedItems, prices, ledger.balances]);
 
   const filtered = useMemo(() => {
-    if (tab === "positions") return items.filter((i) => i.position);
-    if (tab === "claimable") return items.filter((i) => isClaimable(i.basket, i.position, i.settlement));
-    return items.filter((i) => i.created);
-  }, [items, tab]);
+    if (tab === "positions") return mergedItems.filter((i) => i.position);
+    if (tab === "claimable") return mergedItems.filter((i) => isClaimable(i.basket, i.position, i.settlement));
+    return mergedItems.filter((i) => i.created);
+  }, [mergedItems, tab]);
 
   if (!wallet.authenticated) {
     return <Empty cta={<Button onClick={wallet.login} disabled={!wallet.enabled}>Sign in</Button>}>Sign in to see your portfolio</Empty>;

@@ -17,6 +17,7 @@ import { labelFromSlug, LEG_COLORS } from "@/lib/priceHistory";
 export default function BasketPage() {
   const { id } = useParams();
   const wallet = useWallet();
+  const ledger = useLedger();
   const [basket, setBasket] = useState<OnchainBasket | null>(null);
   const [settlement, setSettlement] = useState<OnchainSettlement | null>(null);
   const [position, setPosition] = useState<OnchainPosition | null>(null);
@@ -100,8 +101,14 @@ export default function BasketPage() {
             <StatusPill status={basket.status} />
           </div>
 
-          {/* the user's live position — stake, value, P&L, claim/settlement */}
-          <PositionPanel basket={basket} position={position} settlement={settlement} />
+          {/* the user's live position — stake, value, P&L, claim/settlement.
+              Fall back to the ledger's optimistic position so a just-placed bet shows instantly,
+              before the committed on-chain position (~30-60s) arrives via this page's own poll. */}
+          <PositionPanel
+            basket={basket}
+            position={position ?? ledger.positions.find((p) => String(p.basket_id) === String(basket.id)) ?? null}
+            settlement={settlement}
+          />
 
           {/* combined probability chart — real Polymarket history */}
           <div className="rounded-2xl border border-border bg-card p-4 sm:p-5">

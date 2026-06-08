@@ -15,6 +15,7 @@ interface LedgerState {
   balances: Balances;
   /** Optimistic, not-yet-committed deposit amounts (per collateral). >0 = still finalizing. */
   pending: Balances;
+  /** Real on-chain positions merged with optimistic (just-bet) ones, so a fresh bet shows instantly. */
   positions: OnchainPosition[];
   busy: boolean;
   refresh: () => Promise<void>;
@@ -58,6 +59,10 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState<Balances>({ eth: 0n, wvara: 0n });
   const targetRef = useRef<Balances>({ eth: 0n, wvara: 0n });
   const [positions, setPositions] = useState<OnchainPosition[]>([]);
+  // Optimistic positions — recorded the instant a bet pre-confirms (~1s) so the user sees their
+  // stake immediately, keyed by basket id. The real on-chain position commits ~30-60s later and
+  // replaces it (reconcile effect drops the optimistic entry once the real one appears).
+  const [optimistic, setOptimistic] = useState<Record<string, OnchainPosition>>({});
   const [busy, setBusy] = useState(false);
 
   const chainReady = isChainConfigured();
@@ -67,6 +72,27 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
   const effective = useMemo<Balances>(
     () => ({ eth: balances.eth + pending.eth, wvara: balances.wvara + pending.wvara }),
     [balances, pending],
+  );
+
+  // Real positions + any optimistic bet not yet committed (real wins on id collision).
+  const mergedPositions = useMemo<OnchainPosition[]>(() => {
+    const byId = new Map(positions.map((p) => [String(p.basket_id), p]));
+    for (const [id, p] of Object.entries(optimistic)) if (!byId.has(id)) byId.set(id, p);
+    return [...byId.values()];
+  }, [positions, optimistic]);
+
+  const addOptimisticPosition = useCallback(
+    (basketId: bigint, c: Collateral, amount: bigint, indexBps: number) => {
+      if (!wallet.address) return;
+      setOptimistic((m) => ({
+        ...m,
+        [String(basketId)]: {
+          basket_id: basketId, user: wallet.address as `0x${string}`, collateral: c,
+          shares: amount, index_at_creation_bps: indexBps, claimed: false,
+        },
+      }));
+    },
+    [wallet.address],
   );
 
   const withClient = useCallback(
@@ -103,6 +129,18 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
     const iv = setInterval(refresh, 6000);
     return () => clearInterval(iv);
   }, [chainReady, wallet.authenticated, wallet.address, refresh]);
+
+  // Drop an optimistic position once its real on-chain position has committed (shows up in refresh).
+  useEffect(() => {
+    setOptimistic((m) => {
+      let changed = false;
+      const next = { ...m };
+      for (const p of positions) {
+        if (next[String(p.basket_id)]) { delete next[String(p.basket_id)]; changed = true; }
+      }
+      return changed ? next : m;
+    });
+  }, [positions]);
 
   // Reconcile optimistic pending against the real ledger: once the committed balance reaches the
   // post-deposit target, drop the pending so the effective balance stays exact.
@@ -181,11 +219,13 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const placeBet = useCallback(
-    (basketId: bigint, c: Collateral, human: string, indexBps: number) =>
-      run("Place bet", (client) =>
-        client.bet(basketId, c, toBaseUnits(human, c), indexBps),
-      ).then(() => undefined),
-    [run],
+    async (basketId: bigint, c: Collateral, human: string, indexBps: number) => {
+      const amt = toBaseUnits(human, c);
+      await run("Place bet", (client) => client.bet(basketId, c, amt, indexBps));
+      // Show the stake immediately — real position commits ~30-60s later and replaces this.
+      addOptimisticPosition(basketId, c, amt, indexBps);
+    },
+    [run, addOptimisticPosition],
   );
 
   const claim = useCallback(
@@ -222,6 +262,8 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
             toast.loading(msg, { id }),
           ),
         );
+        // Show the stake instantly in positions; real one commits ~30-60s later and replaces it.
+        if (newId != null) addOptimisticPosition(newId, c, toBaseUnits(human, c), indexBps);
         toast.success("⚡ Slip placed", {
           id,
           description: "Your bet is in — it'll appear in My Baskets shortly.",
@@ -236,12 +278,12 @@ export function LedgerProvider({ children }: { children: React.ReactNode }) {
         setBusy(false);
       }
     },
-    [withClient, refresh],
+    [withClient, refresh, addOptimisticPosition],
   );
 
   const value = useMemo<LedgerState>(
-    () => ({ chainReady, balances: effective, pending, positions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip }),
-    [chainReady, effective, pending, positions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip],
+    () => ({ chainReady, balances: effective, pending, positions: mergedPositions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip }),
+    [chainReady, effective, pending, mergedPositions, busy, refresh, deposit, withdraw, placeBet, claim, createBasket, placeSlip],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
