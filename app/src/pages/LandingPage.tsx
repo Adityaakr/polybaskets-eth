@@ -16,7 +16,7 @@ export default function LandingPage() {
 
       <section className="mx-auto max-w-5xl px-4 pb-24 pt-6 text-center">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-xs uppercase tracking-widest text-primary">
-          <Zap className="h-3.5 w-3.5" /> World Cup 26 · gasless betting on Vara.eth
+          <Zap className="h-3.5 w-3.5" /> World Cup 26
         </span>
 
         {/* Hero banner */}
@@ -56,9 +56,9 @@ export default function LandingPage() {
 
         <div className="mx-auto mt-16 grid max-w-3xl gap-4 text-left sm:grid-cols-3">
           {[
-            { icon: Mail, t: "Email login", d: "Privy embedded wallet — no extension, no seed phrase." },
-            { icon: Zap, t: "Gasless bets", d: "Injected pre-confirmations on Vara.eth feel instant." },
-            { icon: Layers, t: "Multi-leg slips", d: "Weight many outcomes into one tradeable basket." },
+            { icon: Layers, t: "Build your stack", d: "Bundle many Polymarket outcomes into one weighted basket." },
+            { icon: Zap, t: "Stack the odds", d: "Every leg compounds — small stake, outsized payout." },
+            { icon: Mail, t: "One-tap entry", d: "Email login, gasless bets. No extension, no seed phrase." },
           ].map(({ icon: Icon, t, d }) => (
             <div key={t} className="rounded-xl border border-border bg-card p-5">
               <Icon className="h-6 w-6 text-primary" aria-hidden />

@@ -11,7 +11,7 @@ export function Logo({
   showWordmark?: boolean;
 }) {
   return (
-    <span className={cn("flex items-center gap-2.5 font-bold tracking-tight", className)}>
+    <span className={cn("flex items-center gap-1 font-bold tracking-tight", className)}>
       <img
         src="/poly-1.png"
         alt="PolyBaskets"
