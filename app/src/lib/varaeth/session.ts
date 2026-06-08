@@ -3,6 +3,7 @@ import {
   createWalletClient,
   custom,
   http,
+  type Account,
   type PublicClient,
   type WalletClient,
 } from "viem";
@@ -75,12 +76,18 @@ async function ensureHoodi(provider: Eip1193) {
 }
 
 /**
- * Build a full Vara.eth session from a Privy-provided EIP-1193 provider.
+ * Build a full Vara.eth session.
  * One session drives both injected (Vara.eth) and classic (Hoodi) writes.
  * Message encoding is handled by ./codec (no sails-js IDL load needed at runtime).
+ *
+ * Two signing paths:
+ *  - `account` (Privy embedded wallet via toViemAccount): a viem LOCAL account that signs messages
+ *    AND transactions silently — no popup, no raw-provider call. Sends broadcast over http(). This
+ *    is the no-popup email-wallet path (createInjectedTransaction's personal_sign is signed locally).
+ *  - `provider` (external wallet, e.g. MetaMask): EIP-1193; signs with the wallet's own native popup.
  */
 export async function buildSession(
-  provider: Eip1193,
+  source: { provider: Eip1193; account?: undefined } | { account: Account; provider?: undefined },
   address: `0x${string}`,
 ): Promise<VaraEthSession> {
   if (!config.routerAddress || !config.programId) {
@@ -88,17 +95,29 @@ export async function buildSession(
       "Chain not configured — set VITE_ROUTER_ADDRESS and VITE_PROGRAM_ID.",
     );
   }
-  await ensureHoodi(provider);
 
   const publicClient = createPublicClient({
     chain: hoodiChain,
     transport: http(config.ethRpc),
   });
-  const walletClient = createWalletClient({
-    account: address,
-    chain: hoodiChain,
-    transport: custom(provider),
-  });
+
+  // Embedded (local account): sign locally, broadcast over http — fully silent.
+  // External (provider): switch to Hoodi, sign + broadcast through the wallet (native popup).
+  let walletClient: WalletClient;
+  if (source.account) {
+    walletClient = createWalletClient({
+      account: source.account,
+      chain: hoodiChain,
+      transport: http(config.ethRpc),
+    });
+  } else {
+    await ensureHoodi(source.provider);
+    walletClient = createWalletClient({
+      account: address,
+      chain: hoodiChain,
+      transport: custom(source.provider),
+    });
+  }
 
   const ethereumClient = new EthereumClient(
     publicClient,

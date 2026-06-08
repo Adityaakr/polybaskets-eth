@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { PrivyProvider, usePrivy, useWallets } from "@privy-io/react-auth";
+import { PrivyProvider, usePrivy, useWallets, toViemAccount } from "@privy-io/react-auth";
 import { config, hoodiChain } from "@/config";
 import { buildSession, type VaraEthSession } from "@/lib/varaeth";
 
@@ -47,8 +47,19 @@ function PrivyWallet({ children }: { children: React.ReactNode }) {
     if (!address) throw new Error("Connect a wallet first.");
     const wallet = wallets.find((w) => w.address === address) ?? wallets[0];
     if (!wallet) throw new Error("No wallet available.");
-    const provider = await wallet.getEthereumProvider();
-    const session = await buildSession(provider as any, address);
+    // Decide embedded vs external from THE WALLET WE'RE SIGNING WITH (robust — not the memoized
+    // activeWallet, which can point at a different connected wallet).
+    const walletIsEmbedded = wallet.walletClientType === "privy";
+    // Embedded (email) wallet → sign via a viem LOCAL account: bets/deposits sign silently, no popup.
+    // External wallet → its EIP-1193 provider (signs with the wallet's own native prompt).
+    let session: VaraEthSession;
+    if (walletIsEmbedded) {
+      const account = await toViemAccount({ wallet });
+      session = await buildSession({ account: account as any }, address);
+    } else {
+      const provider = await wallet.getEthereumProvider();
+      session = await buildSession({ provider: provider as any }, address);
+    }
     sessionRef.current = session;
     return session;
   }, [address, wallets]);
@@ -96,12 +107,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     <PrivyProvider
       appId={config.privyAppId}
       config={{
-        // External wallets only. Email creates an embedded wallet that starts empty, and gas
-        // can't be sponsored on Hoodi — so those wallets can't deposit/bet. External wallets
-        // (e.g. MetaMask) already hold Hoodi ETH/wVARA and sign + pay gas themselves.
-        loginMethods: ["wallet"],
+        // Email OTP + external wallets. Email creates a Privy embedded wallet that we drive as a viem
+        // LOCAL account (toViemAccount in getSession) — so bets AND deposits sign SILENTLY, no popup,
+        // never touching the raw EIP-1193 provider (which is what threw 4100 with showWalletUIs:false).
+        // showWalletUIs stays true purely as a safety net for any incidental provider use; the silent
+        // path doesn't rely on it. Embedded wallet starts empty; user funds it via the "Fund" QR.
+        loginMethods: ["email", "wallet"],
         embeddedWallets: {
-          createOnLogin: "off",
+          createOnLogin: "users-without-wallets",
+          showWalletUIs: true,
         },
         // Coinbase Smart Wallet doesn't support Hoodi — use EOA-only to avoid unsupported-chain noise.
         externalWallets: { coinbaseWallet: { connectionOptions: "eoaOnly" } },
