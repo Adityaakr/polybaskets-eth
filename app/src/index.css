@@ -75,12 +75,6 @@
     @apply border-border;
   }
 
-  /* Render the whole UI ~10% larger so it looks right at the browser's default 100% zoom
-     (previously it read as too small until ~110%). Scales px + rem uniformly like browser zoom. */
-  html {
-    zoom: 1.1;
-  }
-
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
