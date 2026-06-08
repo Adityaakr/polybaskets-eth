@@ -5,6 +5,11 @@
 !.env.example
 deploy/.env.deploy
 deploy/relayer-state.json
+# ethexe local working dir holds key material (keys/secp/*.json) + the binary
+deploy/ethexe-work/
+deploy/ethexe-bin
+**/keys/secp/
+*.keystore
 
 # ── dependencies ────────────────────────────────────────────────────────
 node_modules/
@@ -25,3 +30,7 @@ target/
 *.log
 .vscode/
 .idea/
+
+# foundry build artifacts
+contract/solidity/cache/
+contract/solidity/out/
