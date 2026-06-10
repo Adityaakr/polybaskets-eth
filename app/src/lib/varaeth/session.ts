@@ -8,7 +8,11 @@ import {
   type WalletClient,
 } from "viem";
 import { toAccount } from "viem/accounts";
-import { EthereumClient, VaraEthApi, WsVaraEthProvider } from "@vara-eth/api";
+// @vara-eth/api 0.5.x (aliased as vara-eth-v5). The validator was upgraded to a versioned injected-tx
+// format; the legacy 0.1.x client (`@vara-eth/api`, still used by the settler/relayer scripts) sends the
+// old payload shape the validator now rejects with `Invalid params :: missing field \`data\``.
+import { createVaraEthApi, EthereumClient, WsVaraEthProvider } from "vara-eth-v5";
+import { walletClientToSigner } from "vara-eth-v5/signer";
 import { SailsProgram } from "sails-js";
 import { SailsIdlParser } from "sails-js/parser";
 import { config, hoodiChain, HOODI_CHAIN_ID_HEX } from "@/config";
@@ -42,7 +46,7 @@ export interface VaraEthSession {
   publicClient: PublicClient;
   walletClient: WalletClient;
   ethereumClient: EthereumClient;
-  api: VaraEthApi;
+  api: Awaited<ReturnType<typeof createVaraEthApi>>;
   program: SailsProgram;
   /** Present for embedded wallets — send value/contract txns via Privy instead of the raw provider. */
   sendTx?: SendTx;
@@ -159,16 +163,22 @@ export async function buildSession(
     });
   }
 
-  const ethereumClient = new EthereumClient(
-    publicClient,
-    walletClient,
-    config.routerAddress,
-  );
-  await ethereumClient.isInitialized;
-
   const wsProvider = new WsVaraEthProvider(config.varaEthWs);
   await wsProvider.connect();
-  const api = new VaraEthApi(wsProvider, ethereumClient);
+  // 0.5.x factory: builds the (signer-based) EthereumClient, awaits init, and runs VaraEthApi.create —
+  // which queries the validator's RPC version so injected txns use the current { data, signature, address }
+  // shape and hashed-payload signing preimage. walletClientToSigner wraps our viem walletClient (whose
+  // account.signMessage already delegates to Privy's useSignMessage for embedded wallets), so the
+  // embedded signing path is unchanged.
+  // viem-type casts: the aliased 0.5.x package resolves a structurally-distinct viem `Client` type, so
+  // tsc flags a nominal mismatch even though the runtime objects are identical viem clients.
+  const api = await createVaraEthApi(
+    wsProvider,
+    publicClient as never,
+    config.routerAddress,
+    walletClientToSigner(walletClient as never),
+  );
+  const ethereumClient = api.eth;
 
   const program = await loadProgram();
 
